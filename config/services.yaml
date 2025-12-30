@@ -7,6 +7,16 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    # Configuración de Rate Limiting para Email
+    email.rate_limit.per_minute: 2
+    email.rate_limit.per_hour: 10
+    email.rate_limit.per_day: 50
+    
+    # Configuración de Seguridad de Email
+    email.security.max_body_length: 10000
+    email.security.max_recipients: 5
+    # email.security.allowed_domains: ['ejemplo.com', 'midominio.com']  # Descomentar para habilitar whitelist
+    email.security.allowed_domains: []  # Vacío = todos los dominios permitidos
 
 services:
     # default configuration for services in *this* file
@@ -18,6 +28,18 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
-
-    # add more service definitions when explicit configuration is needed
-    # please note that last definitions always *replace* previous ones
+    
+    # Configuración del servicio de Rate Limiting
+    App\Service\EmailRateLimiter:
+        arguments:
+            $cacheDir: '%kernel.cache_dir%/email_rate_limiter'
+            $maxEmailsPerMinute: '%email.rate_limit.per_minute%'
+            $maxEmailsPerHour: '%email.rate_limit.per_hour%'
+            $maxEmailsPerDay: '%email.rate_limit.per_day%'
+    
+    # Configuración del servicio de Validación de Seguridad
+    App\Service\EmailSecurityValidator:
+        arguments:
+            $allowedDomains: '%email.security.allowed_domains%'
+            $maxBodyLength: '%email.security.max_body_length%'
+            $maxRecipients: '%email.security.max_recipients%'
