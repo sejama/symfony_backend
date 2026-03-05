@@ -2,7 +2,6 @@
 
 namespace App\Service;
 
-use Symfony\Component\Validator\Constraints as Assert;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
@@ -80,10 +79,9 @@ class EmailSecurityValidator
             '/!!+/',                  // Múltiples exclamaciones
             '/\?{3,}/',               // Múltiples interrogaciones
             '/[A-Z\s]{20,}/',         // Texto largo en mayúsculas
-            '/(.)\1{5,}/',            // Repetición excesiva de caracteres
+            '/([^\s])\1{5,}/',       // Repetición excesiva de caracteres (no espacios)
             
             // Números sospechosos
-            '/\b\d{3,}-?\d{3,}-?\d{4,}\b/', // Posibles números de teléfono spam
             '/\$\d{4,}/',             // Cantidades grandes de dinero
         ];
     }
@@ -158,7 +156,10 @@ class EmailSecurityValidator
      */
     private function detectSpam(string $subject, string $body): bool
     {
-        $content = $subject . ' ' . $body;
+        // Normalizar contenido para evitar falsos positivos por indentación HTML.
+        $plainBody = html_entity_decode(strip_tags($body), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $content = trim($subject . ' ' . $plainBody);
+        $content = preg_replace('/\s+/', ' ', $content) ?? $content;
         
         foreach ($this->spamPatterns as $pattern) {
             if (preg_match($pattern, $content)) {
@@ -166,10 +167,10 @@ class EmailSecurityValidator
             }
         }
         
-        // Detectar exceso de mayúsculas (típico de spam)
+        // Detectar exceso de mayúsculas (típico de spam), evitando falsos positivos en mensajes cortos.
         $upperCount = preg_match_all('/[A-Z]/', $content);
         $totalAlpha = preg_match_all('/[A-Za-z]/', $content);
-        if ($totalAlpha > 0 && ($upperCount / $totalAlpha) > 0.5) {
+        if ($totalAlpha >= 120 && ($upperCount / $totalAlpha) > 0.7) {
             return true;
         }
         
