@@ -16,12 +16,12 @@ class EmailRateLimiter
     private int $maxEmailsPerMinute;
     
     public function __construct(
-        string $cacheDir = null,
-        int $maxEmailsPerMinute = 1,
-        int $maxEmailsPerHour = 3,
-        int $maxEmailsPerDay = 5
+        ?string $storageDir = null,
+        int $maxEmailsPerMinute = 2,
+        int $maxEmailsPerHour = 10,
+        int $maxEmailsPerDay = 50
     ) {
-        $this->storageDir = $cacheDir ?? sys_get_temp_dir() . '/email_rate_limiter';
+        $this->storageDir = $storageDir ?? sys_get_temp_dir() . '/email_rate_limiter';
         $this->maxEmailsPerMinute = $maxEmailsPerMinute;
         $this->maxEmailsPerHour = $maxEmailsPerHour;
         $this->maxEmailsPerDay = $maxEmailsPerDay;
@@ -98,15 +98,19 @@ class EmailRateLimiter
      */
     private function getClientIp(Request $request): string
     {
-        // Intentar obtener IP real detrás de proxies/load balancers
-        $ip = $request->headers->get('X-Forwarded-For');
-        if ($ip) {
-            // X-Forwarded-For puede contener múltiples IPs, usar la primera
-            $ips = explode(',', $ip);
-            return trim($ips[0]);
+        // Soporte para Cloudflare si el dominio está proxificado
+        $cfIp = $request->headers->get('CF-Connecting-IP');
+        if ($cfIp && filter_var($cfIp, FILTER_VALIDATE_IP)) {
+            return $cfIp;
         }
-        
-        return $request->getClientIp() ?? '0.0.0.0';
+
+        // Obtener IP mediante el método nativo de Symfony (seguro si hay trusted_proxies)
+        $clientIp = $request->getClientIp();
+        if ($clientIp && filter_var($clientIp, FILTER_VALIDATE_IP)) {
+            return $clientIp;
+        }
+
+        return '0.0.0.0';
     }
     
     /**
@@ -131,7 +135,7 @@ class EmailRateLimiter
     private function saveHistory(string $ip, array $history): void
     {
         $file = $this->getStorageFile($ip);
-        file_put_contents($file, json_encode($history));
+        file_put_contents($file, json_encode(array_values($history)), LOCK_EX);
     }
     
     /**

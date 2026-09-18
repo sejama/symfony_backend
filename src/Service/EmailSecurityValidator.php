@@ -15,74 +15,52 @@ class EmailSecurityValidator
     private array $allowedDomains;
     private int $maxBodyLength;
     private int $maxRecipients;
+    private bool $spamCheckEnabled;
     
     public function __construct(
         ValidatorInterface $validator,
         array $allowedDomains = [],
         int $maxBodyLength = 10000,
-        int $maxRecipients = 5
+        int $maxRecipients = 5,
+        bool $spamCheckEnabled = true
     ) {
         $this->validator = $validator;
         $this->allowedDomains = $allowedDomains;
         $this->maxBodyLength = $maxBodyLength;
         $this->maxRecipients = $maxRecipients;
+        $this->spamCheckEnabled = $spamCheckEnabled;
         
-        // Patrones comunes de spam - Lista extendida y rigurosa
+        // Patrones de spam refinados para evitar falsos positivos en emails de negocios
         $this->spamPatterns = [
-            // Medicamentos y salud
-            '/\b(viagra|cialis|levitra|pharmacy|prescription|pills|medication|weight.?loss|diet.?pills)\b/i',
-            '/\b(enlargement|enhancement|potency|impotence|erectile)\b/i',
+            // Medicamentos ilegales y spam farmacéutico
+            '/\b(viagra|cialis|levitra|online.?pharmacy|cheap.?pills|weight.?loss.?pills)\b/i',
+            '/\b(enlargement.?pills|potency.?booster)\b/i',
             
-            // Finanzas y dinero
-            '/\b(free money|make money fast|work from home|earn.?\$|quick.?cash|get.?rich)\b/i',
-            '/\b(million dollars?|inheritance|beneficiary|offshore|tax.?haven)\b/i',
-            '/\b(credit.?repair|debt.?free|consolidate.?debt|refinance.?now)\b/i',
-            '/\b(investment.?opportunity|profit.?guarantee|risk.?free|double.?your.?money)\b/i',
+            // Finanzas y estafas piramidales
+            '/\b(free money|make money fast|work from home earn \$|quick.?cash.?now|get.?rich.?quick)\b/i',
+            '/\b(million dollars? inheritance|unclaimed beneficiary|offshore bank account)\b/i',
+            '/\b(credit.?repair guarantee|consolidate.?debt fast|refinance.?now.?instant)\b/i',
+            '/\b(investment.?opportunity 100%|profit.?guarantee|risk.?free double.?your.?money)\b/i',
             
-            // Juegos y apuestas
-            '/\b(casino|lottery|jackpot|winner|prize|congratulations.?you.?won)\b/i',
-            '/\b(slot.?machine|poker|betting|gambling|odds)\b/i',
+            // Juegos y apuestas ilegítimas
+            '/\b(online.?casino jackpot|free spins winner|lottery winner claim)\b/i',
             
-            // Llamadas a la acción urgentes/agresivas
-            '/\b(buy now|click here|limited time|act now|order now|apply now)\b/i',
-            '/\b(urgent|immediate|expires|don\'?t miss|last chance|hurry)\b/i',
-            '/\b(once in a lifetime|exclusive deal|special promotion|limited offer)\b/i',
-            '/\b(call now|subscribe now|sign up now|join now)\b/i',
+            // Llamadas a la acción agresivas / Phishing
+            '/\b(buy now limited offer|click here to claim free|once in a lifetime deal)\b/i',
+            '/\b(act now before it expires|urgent account suspended|click here to reset password)\b/i',
             
             // Contenido adulto
-            '/\b(xxx|adult|porn|sex|dating|singles|meet.?women|meet.?men)\b/i',
-            '/\b(escort|webcam|live.?chat|hot.?girls)\b/i',
+            '/\b(xxx video|adult dating singles|meet.?hot.?girls|escort webcam)\b/i',
             
-            // Esquemas y fraudes
-            '/\b(mlm|multi.?level|pyramid|ponzi|get.?paid.?to)\b/i',
-            '/\b(nigerian|prince|inheritance|unclaimed|beneficiary)\b/i',
-            '/\b(wire.?transfer|western.?union|money.?gram|bitcoin.?wallet)\b/i',
+            // Esquemas de estafas clásicas
+            '/\b(nigerian.?prince|wire transfer western union unclaimed)\b/i',
+            '/\b(send bitcoin to wallet|crypto investment guarantee)\b/i',
             
-            // Ofertas sospechosas
-            '/\b(100%.?free|completely.?free|no.?cost|no.?fees|no.?obligation)\b/i',
-            '/\b(guarantee|certified|approved|verified|authentic)\b/i',
-            '/\b(trial|sample|gift|bonus|reward)\b/i',
-            
-            // Réplicas y falsificaciones
-            '/\b(replica|knock.?off|designer.?copy|authentic.?copy|watches)\b/i',
-            
-            // SEO spam y enlaces
-            '/\b(seo|search.?engine|rank.?first|increase.?traffic)\b/i',
-            '/\b(unsubscribe|opt.?out|remove.?me)\b/i',
-            
-            // Phishing y seguridad
-            '/\b(verify.?account|confirm.?identity|update.?information|suspended.?account)\b/i',
-            '/\b(security.?alert|unusual.?activity|reset.?password|validate)\b/i',
-            
-            // Caracteres y patrones sospechosos
-            '/\$\$\$+/',              // Múltiples signos de dólar
-            '/!!+/',                  // Múltiples exclamaciones
-            '/\?{3,}/',               // Múltiples interrogaciones
-            '/[A-Z\s]{20,}/',         // Texto largo en mayúsculas
-            '/([^\s])\1{5,}/',       // Repetición excesiva de caracteres (no espacios)
-            
-            // Números sospechosos
-            '/\$\d{4,}/',             // Cantidades grandes de dinero
+            // Caracteres y patrones abusivos
+            '/\$\$\$+/',              // Múltiples signos de dólar consecutivos
+            '/!{4,}/',                // 4 o más signos de exclamación consecutivos
+            '/\?{4,}/',               // 4 o más interrogaciones consecutivas
+            '/([^\s])\1{6,}/',       // Repetición excesiva del mismo caracter (>6 veces)
         ];
     }
     
@@ -95,6 +73,14 @@ class EmailSecurityValidator
     {
         $errors = [];
         
+        // Validar trampa anti-bots (Honeypot) si se envía desde formulario frontend
+        if (!empty($data['_hp']) || !empty($data['website_url_hp'])) {
+            return [
+                'valid' => false,
+                'errors' => ['security' => 'Detección automática de spam activada']
+            ];
+        }
+        
         // Validar inyección de headers en subject
         if ($this->detectHeaderInjection($data['subject'] ?? '')) {
             $errors['subject'] = 'Posible inyección de headers detectada en el asunto';
@@ -106,10 +92,12 @@ class EmailSecurityValidator
             $errors['body'] = "El contenido excede el límite de {$this->maxBodyLength} caracteres";
         }
         
-        // Detectar patrones de spam
-        $spamDetected = $this->detectSpam($data['subject'] ?? '', $data['body'] ?? '');
-        if ($spamDetected) {
-            $errors['content'] = 'El contenido contiene patrones sospechosos de spam';
+        // Detectar patrones de spam (si está habilitado)
+        if ($this->spamCheckEnabled) {
+            $spamDetected = $this->detectSpam($data['subject'] ?? '', $data['body'] ?? '');
+            if ($spamDetected) {
+                $errors['content'] = 'El contenido contiene patrones sospechosos de spam';
+            }
         }
         
         // Validar número de destinatarios

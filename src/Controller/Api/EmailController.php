@@ -23,7 +23,10 @@ final class EmailController extends AbstractController
         private readonly ValidatorInterface $validator,
         private readonly EmailRateLimiter $rateLimiter,
         private readonly EmailSecurityValidator $securityValidator,
-        private readonly LoggerInterface $logger
+        private readonly LoggerInterface $logger,
+        private readonly string $defaultFromEmail = 'noreply@example.com',
+        private readonly string $defaultFromName = 'API Mailer',
+        private readonly string $apiKey = ''
     ) {}
 
     #[OA\Post(
@@ -143,6 +146,28 @@ final class EmailController extends AbstractController
     public function send(Request $request): JsonResponse
     {
         try {
+            // 0. VERIFICAR AUTENTICACIÓN (API KEY SI ESTÁ CONFIGURADA)
+            if (!empty($this->apiKey)) {
+                $providedKey = $request->headers->get('X-API-KEY');
+                if (!$providedKey && $authHeader = $request->headers->get('Authorization')) {
+                    if (str_starts_with($authHeader, 'Bearer ')) {
+                        $providedKey = substr($authHeader, 7);
+                    }
+                }
+
+                if (!hash_equals($this->apiKey, (string) $providedKey)) {
+                    $this->logger->warning('Unauthorized API access attempt', [
+                        'ip' => $request->getClientIp()
+                    ]);
+
+                    return $this->json([
+                        'success' => false,
+                        'error' => 'Unauthorized',
+                        'message' => 'API key inválida o ausente'
+                    ], Response::HTTP_UNAUTHORIZED);
+                }
+            }
+
             // 1. VERIFICAR RATE LIMITING
             $rateLimitCheck = $this->rateLimiter->isAllowed($request);
             if (!$rateLimitCheck['allowed']) {
@@ -203,6 +228,12 @@ final class EmailController extends AbstractController
                 ]),
                 'isHtml' => new Assert\Optional([
                     new Assert\Type('bool')
+                ]),
+                '_hp' => new Assert\Optional([
+                    new Assert\Type('string')
+                ]),
+                'website_url_hp' => new Assert\Optional([
+                    new Assert\Type('string')
                 ])
             ]);
 
@@ -241,14 +272,19 @@ final class EmailController extends AbstractController
                 ->to($data['to'])
                 ->subject($data['subject']);
 
-            // Configurar remitente
-            if (isset($data['from'])) {
-                $email->from($data['from']);
-            }
+            // Configurar remitente seguro (compatible con SPF / DKIM de Hostinger)
+            $fromEmail = !empty($data['from']) ? $data['from'] : $this->defaultFromEmail;
 
-            // Configurar reply-to
-            if (isset($data['replyTo'])) {
+            if (!empty($data['replyTo'])) {
                 $email->replyTo($data['replyTo']);
+                $email->from(new \Symfony\Component\Mime\Address($fromEmail, $this->defaultFromName));
+            } elseif (!empty($data['from']) && $data['from'] !== $this->defaultFromEmail) {
+                // Formulario de contacto: el remitente físico autenticado en Hostinger es defaultFromEmail,
+                // y la respuesta (Reply-To) va dirigida a quien llenó el formulario.
+                $email->from(new \Symfony\Component\Mime\Address($this->defaultFromEmail, $this->defaultFromName));
+                $email->replyTo($data['from']);
+            } else {
+                $email->from(new \Symfony\Component\Mime\Address($this->defaultFromEmail, $this->defaultFromName));
             }
 
             // Agregar CC
@@ -353,6 +389,38 @@ final class EmailController extends AbstractController
         return $this->json([
             'success' => true,
             'stats' => $stats
+        ], Response::HTTP_OK);
+    }
+
+    /**
+     * Endpoint ligero para comprobación del estado de la API
+     */
+    #[OA\Get(
+        path: '/api/health',
+        summary: 'Verificar salud del servicio',
+        description: 'Retorna el estado de operatividad de la API para monitoreo y despliegue',
+        tags: ['Health']
+    )]
+    #[OA\Response(
+        response: 200,
+        description: 'Servicio funcionando correctamente',
+        content: new OA\JsonContent(
+            properties: [
+                new OA\Property(property: 'success', type: 'boolean', example: true),
+                new OA\Property(property: 'status', type: 'string', example: 'ok'),
+                new OA\Property(property: 'service', type: 'string', example: 'email-api'),
+                new OA\Property(property: 'timestamp', type: 'string', format: 'date-time', example: '2026-09-18T14:30:00+00:00')
+            ]
+        )
+    )]
+    #[Route('/api/health', name: 'app_api_health', methods: ['GET'])]
+    public function health(): JsonResponse
+    {
+        return $this->json([
+            'success' => true,
+            'status' => 'ok',
+            'service' => 'email-api',
+            'timestamp' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM)
         ], Response::HTTP_OK);
     }
 }

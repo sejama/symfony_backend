@@ -7,6 +7,19 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    # Defaults de variables de entorno
+    env(MAIL_API_KEY): ''
+    env(MAILER_DEFAULT_FROM_EMAIL): 'noreply@example.com'
+    env(MAILER_DEFAULT_FROM_NAME): 'API Mailer'
+    env(CORS_ALLOW_ORIGIN): '*'
+    env(EMAIL_SPAM_CHECK_ENABLED): 'true'
+
+    api.api_key: '%env(MAIL_API_KEY)%'
+    mailer.default_from_email: '%env(MAILER_DEFAULT_FROM_EMAIL)%'
+    mailer.default_from_name: '%env(MAILER_DEFAULT_FROM_NAME)%'
+    cors.allow_origin: '%env(CORS_ALLOW_ORIGIN)%'
+    email.security.spam_check_enabled: '%env(bool:EMAIL_SPAM_CHECK_ENABLED)%'
+
     # Configuración de Rate Limiting para Email
     email.rate_limit.per_minute: 2
     email.rate_limit.per_hour: 10
@@ -29,10 +42,10 @@ services:
     App\:
         resource: '../src/'
     
-    # Configuración del servicio de Rate Limiting
+    # Configuración del servicio de Rate Limiting (almacenamiento persistente fuera de la caché)
     App\Service\EmailRateLimiter:
         arguments:
-            $cacheDir: '%kernel.cache_dir%/email_rate_limiter'
+            $storageDir: '%kernel.project_dir%/var/rate_limiter'
             $maxEmailsPerMinute: '%email.rate_limit.per_minute%'
             $maxEmailsPerHour: '%email.rate_limit.per_hour%'
             $maxEmailsPerDay: '%email.rate_limit.per_day%'
@@ -40,6 +53,21 @@ services:
     # Configuración del servicio de Validación de Seguridad
     App\Service\EmailSecurityValidator:
         arguments:
+            $validator: '@validator'
             $allowedDomains: '%email.security.allowed_domains%'
             $maxBodyLength: '%email.security.max_body_length%'
             $maxRecipients: '%email.security.max_recipients%'
+            $spamCheckEnabled: '%email.security.spam_check_enabled%'
+
+    # Configuración de CORS
+    App\EventSubscriber\CorsSubscriber:
+        arguments:
+            $allowOrigin: '%cors.allow_origin%'
+
+    # Configuración del controlador de Email
+    App\Controller\Api\EmailController:
+        arguments:
+            $defaultFromEmail: '%mailer.default_from_email%'
+            $defaultFromName: '%mailer.default_from_name%'
+            $apiKey: '%api.api_key%'
+

@@ -3,10 +3,14 @@
  * Incluye verificación de límites antes de enviar y manejo de errores mejorado
  */
 
+// URL base de la API (en Hostinger ej: 'https://api.tudominio.com' o 'https://tudominio.com/api')
+const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8080/backend/public';
+const API_KEY = window.API_KEY || ''; // Opcional: configurar si MAIL_API_KEY está definida en el backend
+
 // Función para verificar los límites disponibles antes de enviar
 async function checkEmailLimits() {
     try {
-        const response = await fetch('http://localhost:8080/backend/public/api/email/stats');
+        const response = await fetch(`${API_BASE_URL}/api/email/stats`);
         const data = await response.json();
         
         if (data.success) {
@@ -37,12 +41,17 @@ async function sendSecureEmail(formData) {
         }
         
         // 2. Enviar el email
-        const response = await fetch('http://localhost:8080/backend/public/api/email/send', {
+        const headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        };
+        if (API_KEY) {
+            headers['X-API-KEY'] = API_KEY;
+        }
+
+        const response = await fetch(`${API_BASE_URL}/api/email/send`, {
             method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify(formData)
         });
         

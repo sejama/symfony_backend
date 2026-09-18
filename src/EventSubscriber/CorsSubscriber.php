@@ -10,6 +10,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class CorsSubscriber implements EventSubscriberInterface
 {
+    public function __construct(
+        private readonly string $allowOrigin = '*'
+    ) {}
+
     public static function getSubscribedEvents(): array
     {
         return [
@@ -53,11 +57,20 @@ class CorsSubscriber implements EventSubscriberInterface
     {
         $origin = $request->headers->get('Origin');
         
-        // Permitir todos los orígenes (en producción, especifica los dominios permitidos)
-        $response->headers->set('Access-Control-Allow-Origin', $origin ?: '*');
+        if ($this->allowOrigin === '*' || empty($this->allowOrigin)) {
+            $response->headers->set('Access-Control-Allow-Origin', $origin ?: '*');
+        } else {
+            $allowedList = array_map('trim', explode(',', $this->allowOrigin));
+            if ($origin && in_array($origin, $allowedList, true)) {
+                $response->headers->set('Access-Control-Allow-Origin', $origin);
+            } elseif (!empty($allowedList)) {
+                $response->headers->set('Access-Control-Allow-Origin', $allowedList[0]);
+            }
+        }
+
         $response->headers->set('Access-Control-Allow-Credentials', 'true');
         $response->headers->set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+        $response->headers->set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-API-KEY');
         $response->headers->set('Access-Control-Max-Age', '3600');
     }
 }
